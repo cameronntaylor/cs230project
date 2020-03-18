@@ -1,10 +1,30 @@
+#!/usr/bin/python
+
+import sys
 import tensorflow as tf
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tensorflow.keras import datasets, layers, models
+from tensorflow.keras import datasets, layers, models, utils, optimizers, losses, regularizers
 import matplotlib.pyplot as plt
 
 
+# Load in data parameters
+# NOTE: May need to change based on if runnning on 
+# AWS or locally
+X_NV_INPUT = "preprocessed/X_nv_pp.npy"
+X_V_INPUT = "preprocessed/X_v_pp.npy"
+Y_INPUT = "preprocessed/y_pp.npy"
+
+## Do you want plots?
+PLOT = 0
+
+## Regularize?
+REGULARIZE = 1
+
+## RANDOM SEED TO BE FIXED THROUGHOUT
+RANDOM_STATE = 1
+np.random.seed(RANDOM_STATE)
+tf.set_random_seed(RANDOM_STATE)
 
 ## CNN NETWORK ARCHITECTURE
 '''
@@ -13,49 +33,54 @@ adding in the situational data that has some predictive power
 '''
 
 # Model HYPERPARAMETERS
+# PARAMETERS TO BE INSERTED FOR TUNING
+EPOCHS = int(sys.argv[1])
+LEARNING_RATE = float(sys.argv[2])
+MINI_BATCH = int(sys.argv[3])
+NUM_UNITS = int(sys.argv[4])
+FILTER_SIZE = int(sys.argv[5])
 
+# Model input for video data
+input_v = layers.Input(shape=(230, 119, 3), name='video')
+input_s = layers.Input(shape=(92,), name='situation')
 
-# Initiate model
-model = models.Sequential()
+# CONV1
+conv1 = layers.Conv2D(8, (FILTER_SIZE, FILTER_SIZE), activation='relu', 
+	kernel_initializer="he_normal",
+	input_shape=(230, 119, 3))(input_v)
+# MAXPOOL1
+maxpool1 = layers.MaxPooling2D((2, 2))(conv1)
+# CONV2
+conv2 = layers.Conv2D(16, (FILTER_SIZE, FILTER_SIZE), activation='relu',
+	kernel_initializer="he_normal")(maxpool1)
+# MAXPOOL2
+maxpool2 = layers.MaxPooling2D((2, 2))(conv2)
+# FLATTEN
+flatten = layers.Flatten()(maxpool2)
+# ADD+DENSE
+concat = layers.concatenate([flatten, input_s])
+if REGULARIZE:
+	dense = layers.Dense(NUM_UNITS, activation="relu",
+		kernel_initializer="he_normal",
+		kernel_regularizer=regularizers.l2(0.001))(concat)
+else:
+	dense = layers.Dense(NUM_UNITS, activation="relu",
+		kernel_initializer="he_normal")(concat)
 
-# CONV1 Layer
-model.add(layers.Conv2D(8, (5, 5), 
-	activation='relu', 
-	input_shape=(230, 119, 3)))
+# OUTPUT
+if REGULARIZE:
+	out = layers.Dense(1, activation="linear", 
+		kernel_regularizer=regularizers.l2(0.001))(dense)
+else:
+	out = layers.Dense(1, activation="linear")(dense)
 
-# MAXPOOL1 Layer
-model.add(layers.MaxPooling2D((2, 2)))
+# Define model
+model = models.Model(inputs=[input_v, input_s], outputs=out)
 
-# CONV2 Layer
-model.add(layers.Conv2D(16, (5, 5), 
-	activation='relu'))
-
-# MAXPOOL2 Layer
-model.add(layers.MaxPooling2D((2, 2)))
-
-# CONV3 Layer
-model.add(layers.Conv2D(16, (5, 5), 
-	activation='relu'))
-
-# Flatten layer
-model.add(layers.Flatten())
-
-# Penultimate dense layer with situational variables added
-model.add(layers.Dense(5, 
-	activation="relu",
-	input_shape=(37536+4,)))
-
-# Final dense layer
-# NOTE: Linear activation because regression output
-model.add(layers.Dense(1, 
-	activation="linear"))
-
-
-# Model compilation
-model.compile(optimizer="adam",
-              loss="mean_squared_error",
-              metrics=["mean_squared_error",
-              "mean_absolute_error"])
+# Define optimizer and metrics
+model.compile(optimizer=optimizers.Adam(lr=LEARNING_RATE),
+              metrics=["mean_absolute_error"],
+              loss="mean_absolute_error")
 
 
 #### RUN CODE
@@ -64,10 +89,7 @@ model.compile(optimizer="adam",
 	# This should be easy to do as a first step
 
 
-# Load in data
-X_NV_INPUT = "data/preprocessed/X_nv_pp.npy"
-X_V_INPUT = "data/preprocessed/X_v_pp.npy"
-Y_INPUT = "data/preprocessed/y_pp.npy"
+
 
 # Train/Dev/Test split
 TRAIN_PER = 0.75
@@ -89,34 +111,59 @@ X_nv = np.load(X_NV_INPUT, allow_pickle=True)
 X_v = np.load(X_V_INPUT, allow_pickle=True) / 255.0
 Y = np.load(Y_INPUT, allow_pickle=True).astype("float64")
 
+# Split into training, dev and test
+m = X_nv.shape[0]
+shuffled_indices = np.arange(m)
+np.random.shuffle(shuffled_indices)
 
-X_v_train, X_v_test, Y_train, Y_test = train_test_split(X_v, Y, test_size=TEST_PER, random_state=RANDOM_STATE)
-X_v_train, X_v_dev, Y_train, Y_dev = train_test_split(X_v_train, Y_train, test_size=DEV_PER/(1-TEST_PER), random_state=RANDOM_STATE)
+train_idxs = shuffled_indices[:int(m*TRAIN_PER)]
+dev_idxs = shuffled_indices[(int(m*TRAIN_PER)):(int(m*TRAIN_PER)+int(m*DEV_PER))]
+test_idxs = shuffled_indices[(int(m*TRAIN_PER)+int(m*DEV_PER)):]
+
+X_v_train, X_nv_train, Y_train = X_v[train_idxs,:,:,:], X_nv[train_idxs,:], Y[train_idxs, WHICH_Y]
+X_v_dev, X_nv_dev, Y_dev = X_v[dev_idxs,:,:,:], X_nv[dev_idxs,:], Y[dev_idxs, WHICH_Y]
+X_v_test, X_nv_test, Y_test= X_v[test_idxs,:,:,:], X_nv[test_idxs,:], Y[test_idxs, WHICH_Y]
 
 # DATA AUGMENT
 if DATA_AUGMENT:
 	None
 
-# Training 
-history = model.fit(X_v_train,
+
+# Training
+history = model.fit(
+	{'video' : X_v_train,
+	'situation' : X_nv_train},
                     Y_train,
-                    epochs=10,
+                    epochs=EPOCHS,
                     verbose=2,
-                    batch_size=32,
-                    validation_data=(X_v_dev, Y_dev))
+                    batch_size=MINI_BATCH)
 
-loss_history = history.history['loss']
-val_loss_history = history.history['val_loss']
 
-plt.plot(history.epoch,
-	loss_history)
-plt.ylabel('cost')
-plt.ylabel('epoch')
-plt.show()
+
+#loss_history = history.history['loss']
+#val_loss_history = history.history['val_loss']
+
+if PLOT:
+	plt.plot(history.epoch,
+		loss_history,
+		history.epoch)
+	plt.ylabel('cost')
+	plt.xlabel('epoch')
+	plt.show()
 
 # Evaluating model
-model.evaluate(X_v_test, Y_test, verbose=2)
-fits = model.predict(X_v_test)
-final_score_SCNN = np.mean(np.abs(fits- Y_test[:, WHICH_Y]))
-final_score_SCNN2 = np.median(np.abs(fits- Y_test[:, WHICH_Y]))
-
+fits = model.predict({'video' : X_v_dev, 'situation' : X_nv_dev})
+final_score_SCNN = np.median(np.abs(np.around(fits)- Y_dev))
+print(fits[0:99].astype(int))
+print("Epochs: "+str(EPOCHS))
+print("Learning Rate: "+str(LEARNING_RATE))
+print("Mini Batch: "+str(MINI_BATCH))
+print("Num Hidden Units: "+str(NUM_UNITS))
+print("Filter Size: "+str(FILTER_SIZE))
+print("Eval Metric on Dev Set: "+str(final_score_SCNN))
+test_fits = model.predict({'video' : X_v_test, 'situation' : X_nv_test})
+final_score_test = np.median(np.abs(np.around(test_fits)- Y_test))
+print("Eval Metric on Test Set: "+str(final_score_test))
+print("Mean abs yards on Dev: "+str(np.mean(np.abs(np.around(fits)- Y_dev))))
+print("SD of predicted yards: "+str(np.std(test_fits.astype(int))))
+print("Mean abs yards on Test: "+str(np.mean(np.abs(np.around(test_fits)- Y_test))))
