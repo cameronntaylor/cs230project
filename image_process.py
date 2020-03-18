@@ -36,6 +36,7 @@ if OUTPUT_IND==1:
 	merged_array = np.empty((0,2))
 
 # Loop by game
+k0 = 0
 for game in game_folders:
 	# Get all images in that folder
 	image_names = [f for f in os.listdir(image_folder+game) if os.path.isfile(os.path.join(image_folder+game, f))]
@@ -61,6 +62,7 @@ for game in game_folders:
 		# Show image (randomly to see what they look like)
 		if SHOW_IMAGES==1:
 			my_imagers.show() if (np.random.uniform() < 0.0075) else None
+			#my_imagers.show() if k0 in valid_idxs[[666, 251, 271, 44, 788]] else None
 		# Get final size after cropping (230, 119) when SIZE = (384, 216)
 		final_size = my_imagers.size
 		
@@ -77,6 +79,8 @@ for game in game_folders:
 		qtr = game_coverage['qtr'].iloc[k]
 		time = game_coverage['time'].iloc[k]
 		game_data_info = np.array([team1, team2, date, qtr, time])
+
+		k0+=1
 
 		# Store in dataframe
 		# Shape goal = (num obs, 2)

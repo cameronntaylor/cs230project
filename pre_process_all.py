@@ -98,6 +98,9 @@ for row in range(X_video.shape[0]):
 # GET ys
 y_real = kaggle_array[:, y_yds_col].reshape(-1,1)
 
+y_play = kaggle_array[:, y_play_col].reshape(-1,1)
+y_play = np.array([0 if xi=='Run' else 1 for xi in y_play]).reshape(-1,1)
+
 y_posplay = (1.0*(kaggle_array[:, y_yds_col]>0)).reshape(-1,1)
 
 y_ontrack = (1.0*(kaggle_array[:, y_yds_col]>3)).reshape(-1,1)
@@ -108,9 +111,9 @@ y_firstdown = (kaggle_array[:, y_firstdown_col]).reshape(-1,1)
 # Put together
 
 X = (X_video, X_nonvideo)
-Y = np.concatenate((y_real, y_posplay, y_ontrack, y_firstdown), axis=1)
+Y = np.concatenate((y_real, y_play, y_posplay, y_ontrack, y_firstdown), axis=1)
 
 # Output
 np.save(X_V_OUTPUT , X_video)
 np.save(X_NV_OUTPUT , X_nonvideo)
-np.save(Y_OUTPUT , y)
+np.save(Y_OUTPUT , Y)
